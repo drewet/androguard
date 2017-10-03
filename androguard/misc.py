@@ -1,143 +1,90 @@
-from androguard.core import *
-from androguard.core.androgen import *
-from androguard.core.bytecode import *
+from future import standard_library
+
+standard_library.install_aliases()
+from androguard import session
 from androguard.core.bytecodes.dvm import *
-from androguard.core.bytecodes.apk import *
-from androguard.core.analysis.analysis import *
-from androguard.core.analysis.ganalysis import *
 from androguard.decompiler.decompiler import *
-
-from cPickle import dumps, loads
-from androguard.core import androconf
-
-def save_session(l, filename):
-  """
-      save your session !
-
-      :param l: a list of objects
-      :type: a list of object
-      :param filename: output filename to save the session
-      :type filename: string
-
-      :Example:
-          save_session([a, vm, vmx], "msession.json")
-  """
-  with open(filename, "w") as fd:
-     fd.write(dumps(l, -1))
+from androguard.core.androconf import CONF
 
 
-def load_session(filename):
-  """
-      load your session !
+def init_print_colors():
+    from IPython.utils import coloransi, io
+    androconf.default_colors(coloransi.TermColors)
+    CONF["PRINT_FCT"] = io.stdout.write
 
-      :param filename: the filename where the session has been saved
-      :type filename: string
 
-      :rtype: the elements of your session :)
+def get_default_session():
+    """
+        Return the default Session from the configuration
+        or create a new one, if the session is None.
+    """
+    if CONF["SESSION"] is None:
+        CONF["SESSION"] = session.Session()
+    return CONF["SESSION"]
 
-      :Example:
-          a, vm, vmx = load_session("mysession.json")
-  """
-  return loads(read(filename, binary=False))
 
-def AnalyzeAPK(filename, raw=False, decompiler="dad"):
+def AnalyzeAPK(filename, session=None):
     """
         Analyze an android application and setup all stuff for a more quickly analysis !
 
+        :param session: A session (default None)
         :param filename: the filename of the android application or a buffer which represents the application
         :type filename: string
-        :param raw: True is you would like to use a buffer (optional)
-        :type raw: boolean
-        :param decompiler: ded, dex2jad, dad (optional)
-        :type decompiler: string
 
         :rtype: return the :class:`APK`, :class:`DalvikVMFormat`, and :class:`VMAnalysis` objects
     """
-    androconf.debug("APK ...")
-    a = APK(filename, raw)
-    d, dx = AnalyzeDex(a.get_dex(), raw=True, decompiler=decompiler)
-    return a, d, dx
+    androconf.debug("AnalyzeAPK")
+
+    if not session:
+        session = get_default_session()
+
+    with open(filename, "rb") as fd:
+        data = fd.read()
+
+    session.add(filename, data)
+    return session.get_objects_apk(filename)
 
 
-def AnalyzeDex(filename, raw=False, decompiler="dad"):
+def AnalyzeDex(filename, session=None):
     """
         Analyze an android dex file and setup all stuff for a more quickly analysis !
 
+        :param session: A session (Default None)
         :param filename: the filename of the android dex file or a buffer which represents the dex file
         :type filename: string
-        :param raw: True is you would like to use a buffer (optional)
-        :type raw: boolean
 
         :rtype: return the :class:`DalvikVMFormat`, and :class:`VMAnalysis` objects
     """
-    androconf.debug("DalvikVMFormat ...")
+    androconf.debug("AnalyzeDex")
 
-    d = None
-    if raw == False:
-        d = DalvikVMFormat(read(filename))
-    else:
-        d = DalvikVMFormat(filename)
+    if not session:
+        session = get_default_session()
 
-    androconf.debug("Export VM to python namespace")
-    d.create_python_export()
+    with open(filename, "rb") as fd:
+        data = fd.read()
 
-    androconf.debug("VMAnalysis ...")
-    dx = uVMAnalysis(d)
-
-    androconf.debug("GVMAnalysis ...")
-    gx = GVMAnalysis(dx, None)
-
-    d.set_vmanalysis(dx)
-    d.set_gvmanalysis(gx)
-
-    RunDecompiler(d, dx, decompiler)
-
-    androconf.debug("XREF ...")
-    d.create_xref()
-    androconf.debug("DREF ...")
-    d.create_dref()
-
-    return d, dx
+    return session.addDEX(filename, data)
 
 
-def AnalyzeODex(filename, raw=False, decompiler="dad"):
+def AnalyzeODex(filename, session=None):
     """
         Analyze an android odex file and setup all stuff for a more quickly analysis !
 
         :param filename: the filename of the android dex file or a buffer which represents the dex file
         :type filename: string
-        :param raw: True is you would like to use a buffer (optional)
-        :type raw: boolean
+        :param session: The Androguard Session to add the ODex to (default: None)
 
         :rtype: return the :class:`DalvikOdexVMFormat`, and :class:`VMAnalysis` objects
     """
-    androconf.debug("DalvikOdexVMFormat ...")
-    d = None
-    if raw == False:
-        d = DalvikOdexVMFormat(read(filename))
-    else:
-        d = DalvikOdexVMFormat(filename)
+    androconf.debug("AnalyzeODex")
 
-    androconf.debug("Export VM to python namespace")
-    d.create_python_export()
+    if not session:
+        session = get_default_session()
 
-    androconf.debug("VMAnalysis ...")
-    dx = uVMAnalysis(d)
+    with open(filename, "rb") as fd:
+        data = fd.read()
 
-    androconf.debug("GVMAnalysis ...")
-    gx = GVMAnalysis(dx, None)
-
-    d.set_vmanalysis(dx)
-    d.set_gvmanalysis(gx)
-
-    RunDecompiler(d, dx, decompiler)
-
-    androconf.debug("XREF ...")
-    d.create_xref()
-    androconf.debug("DREF ...")
-    d.create_dref()
-
-    return d, dx
+    return session.addDEY(filename, data)
 
 
 def RunDecompiler(d, dx, decompiler):
@@ -151,49 +98,31 @@ def RunDecompiler(d, dx, decompiler):
         :param decompiler: the type of decompiler to use ("dad", "dex2jad", "ded")
         :type decompiler: string
     """
-    if decompiler != None:
-      androconf.debug("Decompiler ...")
-      decompiler = decompiler.lower()
-      if decompiler == "dex2jad":
-        d.set_decompiler(DecompilerDex2Jad(d,
-                                           androconf.CONF["PATH_DEX2JAR"],
-                                           androconf.CONF["BIN_DEX2JAR"],
-                                           androconf.CONF["PATH_JAD"],
-                                           androconf.CONF["BIN_JAD"],
-                                           androconf.CONF["TMP_DIRECTORY"]))
-      elif decompiler == "dex2fernflower":
-        d.set_decompiler(DecompilerDex2Fernflower(d,
-                                                  androconf.CONF["PATH_DEX2JAR"],
-                                                  androconf.CONF["BIN_DEX2JAR"],
-                                                  androconf.CONF["PATH_FERNFLOWER"],
-                                                  androconf.CONF["BIN_FERNFLOWER"],
-                                                  androconf.CONF["OPTIONS_FERNFLOWER"],
-                                                  androconf.CONF["TMP_DIRECTORY"]))
-      elif decompiler == "ded":
-        d.set_decompiler(DecompilerDed(d,
-                                       androconf.CONF["PATH_DED"],
-                                       androconf.CONF["BIN_DED"],
-                                       androconf.CONF["TMP_DIRECTORY"]))
-      else:
-        d.set_decompiler(DecompilerDAD(d, dx))
-
-
-def AnalyzeElf(filename, raw=False):
-    # avoid to install smiasm for everybody
-    from androguard.core.binaries.elf import ELF
-
-    e = None
-    if raw == False:
-        e = ELF(read(filename))
-    else:
-        e = ELF(filename)
-
-    ExportElfToPython(e)
-
-    return e
-
-
-def ExportElfToPython(e):
-    for function in e.get_functions():
-        name = "FUNCTION_" + function.name
-        setattr(e, name, function)
+    if decompiler is not None:
+        androconf.debug("Decompiler ...")
+        decompiler = decompiler.lower()
+        if decompiler == "dex2jad":
+            d.set_decompiler(DecompilerDex2Jad(
+                d,
+                androconf.CONF["PATH_DEX2JAR"],
+                androconf.CONF["BIN_DEX2JAR"],
+                androconf.CONF["PATH_JAD"],
+                androconf.CONF["BIN_JAD"],
+                androconf.CONF["TMP_DIRECTORY"]))
+        elif decompiler == "dex2fernflower":
+            d.set_decompiler(DecompilerDex2Fernflower(
+                d,
+                androconf.CONF["PATH_DEX2JAR"],
+                androconf.CONF["BIN_DEX2JAR"],
+                androconf.CONF["PATH_FERNFLOWER"],
+                androconf.CONF["BIN_FERNFLOWER"],
+                androconf.CONF["OPTIONS_FERNFLOWER"],
+                androconf.CONF["TMP_DIRECTORY"]))
+        elif decompiler == "ded":
+            d.set_decompiler(DecompilerDed(
+                d,
+                androconf.CONF["PATH_DED"],
+                androconf.CONF["BIN_DED"],
+                androconf.CONF["TMP_DIRECTORY"]))
+        else:
+            d.set_decompiler(DecompilerDAD(d, dx))
